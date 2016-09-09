@@ -10,6 +10,10 @@ class CurlClient implements ClientInterface
 {
     private static $instance;
 
+    // @var integer The cached value of our best guess for CURLOPT_SSLVERSION.
+    // null is actually a meaningful value, so we use -1 to mark the value as unitialized.
+    private static $optSslVersionAuto = -1;
+
     public static function instance()
     {
         if (!self::$instance) {
@@ -158,28 +162,50 @@ class CurlClient implements ClientInterface
         // Explicitly set a TLS version for cURL to use now that we're starting
         // to block 1.0 and 1.1 requests.
         //
-        // If users are on OpenSSL >= 1.0.1, we know that they support TLS 1.2,
-        // so set that explicitly because on some older Linux distros, clients may
-        // default to TLS 1.0 even when they have TLS 1.2 available.
+
+        // cURL constants are not defined in PHP < 5.5
         //
-        // For users on much older versions of OpenSSL, set a valid range of
-        // TLS 1.0 to 1.2 (CURL_SSLVERSION_TLSv1). Note that this may result in
-        // their requests being blocked unless they're specially flagged into
-        // being able to use an old TLS version.
-        //
-        // Note: The int on the right is pulled from the source of OpenSSL 1.0.1a.
-        if (OPENSSL_VERSION_NUMBER >= 0x1000100f) {
-            if (!defined('CURL_SSLVERSION_TLSv1_2')) {
-                // Note the value 6 comes from its position in the enum that
-                // defines it in cURL's source code.
-                define('CURL_SSLVERSION_TLSv1_2', 6); // constant not defined in PHP < 5.5
-            }
-            $opts[CURLOPT_SSLVERSION] = CURL_SSLVERSION_TLSv1_2;
-        } else {
-            if (!defined('CURL_SSLVERSION_TLSv1')) {
-                define('CURL_SSLVERSION_TLSv1', 1); // constant not defined in PHP < 5.5
-            }
-            $opts[CURLOPT_SSLVERSION] = CURL_SSLVERSION_TLSv1;
+        // Note the values 1 and 6 come from their position in the enum that
+        // defines them in cURL's source code.
+        if (!defined('CURL_SSLVERSION_TLSv1')) {
+            define('CURL_SSLVERSION_TLSv1', 1);
+        }
+        if (!defined('CURL_SSLVERSION_TLSv1_2')) {
+            define('CURL_SSLVERSION_TLSv1_2', 6);
+        }
+
+        $optSslVersion = null;
+        switch (Stripe::$tlsVersion) {
+            case 'auto':
+                // We cache the result in the static variable $optSslVersionAuto so we don't
+                // parse the versions for every request.
+                if (self::$optSslVersionAuto === -1) {
+                    $curlVersion = curl_version();
+
+                    if (substr($curlVersion['ssl_version'], 0, 4) == 'NSS/') {
+                        // cURL uses NSS as its SSL implementation: we set the CURL_SSLVERSION_TLSv1
+                        // option to force TLS 1.2 (cf. https://bugzilla.redhat.com/show_bug.cgi?id=1170339)
+                        self::$optSslVersionAuto = CURL_SSLVERSION_TLSv1;
+                    } else {
+                        // cURL uses a different SSL implementation: the highest protocol version
+                        // should be used by default
+                        self::$optSslVersionAuto = null;
+                    }
+                }
+                $optSslVersion = self::$optSslVersionAuto;
+                break;
+            case 'none':
+                $optSslVersion = null;
+                break;
+            case 'TLSv1':
+                $optSslVersion = CURL_SSLVERSION_TLSv1;
+                break;
+            case 'TLSv1_2':
+                $optSslVersion = CURL_SSLVERSION_TLSv1_2;
+                break;
+        }
+        if ($optSslVersion !== null) {
+            $opts[CURLOPT_SSLVERSION] = $optSslVersion;
         }
         // @codingStandardsIgnoreEnd
 

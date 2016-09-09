@@ -30,6 +30,9 @@ class Stripe
     // @var array The application's information (name, version, URL)
     public static $appInfo = null;
 
+    // @var string The TLS version detection method
+    public static $tlsVersion = 'auto';
+
     const VERSION = '3.22.0';
 
     /**
@@ -122,5 +125,21 @@ class Stripe
         self::$appInfo['name'] = $appName;
         self::$appInfo['version'] = $appVersion;
         self::$appInfo['url'] = $appUrl;
+    }
+
+    /**
+     * @return string
+     */
+    public static function getTlsVersion()
+    {
+        return self::$tlsVersion;
+    }
+
+    /**
+     * @param boolean $verify
+     */
+    public static function setTlsVersion($tlsVersion)
+    {
+        self::$tlsVersion = $tlsVersion;
     }
 }
